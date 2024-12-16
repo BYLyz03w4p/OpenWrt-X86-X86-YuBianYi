@@ -50,6 +50,13 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/graalvm /usr/local/.ghcup \
         /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
 
+    - name: 清理环境
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
     - name: 克隆源代码
       working-directory: ./
       run: |
@@ -113,6 +120,15 @@ jobs:
         ls -lh
         echo "status=success" >> $GITHUB_OUTPUT
 
+    - name: 检查文件大小
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        cd ${{ env.FIRMWARE }}
+        for file in *; do
+          size=$(stat -f%z "$file")
+          echo "$file size: $size bytes"
+        done
+
     - name: 上传固件目录
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
@@ -131,12 +147,15 @@ jobs:
     - name: 上传固件到发布
       uses: softprops/action-gh-release@master
       if: steps.tag.outputs.status == 'success' && !cancelled()
+      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        chunked_upload: true
+        fail_on_unmatched_files: false
 
     - name: 删除旧的 workflow 运行记录
       uses: Mattraks/delete-workflow-runs@main
