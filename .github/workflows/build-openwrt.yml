@@ -65,12 +65,9 @@ jobs:
         /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
 
    - name: 克隆源代码
-     working-directory: /srcdir
-     run: |
-       echo "Free space:"
-       df -hT $PWD
-       git clone $REPO_URL -b $REPO_BRANCH openwrt
-       ln -sf /srcdir/openwrt $GITHUB_WORKSPACE/openwrt
+      working-directory: ./
+      run: |
+        git clone --depth=1 --single-branch $REPO_URL -b $REPO_BRANCH openwrt
 
    - name: 加载自定义 feeds
      run: |
