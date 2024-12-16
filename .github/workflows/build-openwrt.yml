@@ -7,35 +7,49 @@
 name: Build OpenWrt
 
 on:
-  #schedule:
-    #- cron: "0 20 * * *"
-  workflow_dispatch:
+ #schedule:
+   #- cron: "0 20 * * *"
+ workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/openwrt/openwrt
-  REPO_BRANCH: openwrt-24.10
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
-  TZ: Asia/Shanghai
+ REPO_URL: https://github.com/openwrt/openwrt
+ REPO_BRANCH: openwrt-24.10
+ FEEDS_CONF: feeds.conf.default
+ CONFIG_FILE: .config
+ DIY_P1_SH: diy-part1.sh
+ DIY_P2_SH: diy-part2.sh
+ UPLOAD_BIN_DIR: false
+ UPLOAD_FIRMWARE: true
+ UPLOAD_RELEASE: true
+ TZ: Asia/Shanghai
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+ build:
+   runs-on: ubuntu-24.04
+   
+   permissions:
+     contents: write
+     actions: write
 
-    steps:
-    - name: Checkout
-      uses: actions/checkout@main
+   steps:
+   - name: Free disk space (Ubuntu)
+     uses: jlumbroso/free-disk-space@main
+     with:
+       tool-cache: false
+       android: true
+       dotnet: true
+       haskell: true
+       large-packages: true
+       swap-storage: false
 
-    - name: 初始化环境
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo -E apt-get -qq update
+   - name: Checkout
+     uses: actions/checkout@main
+
+   - name: 初始化环境
+     env:
+       DEBIAN_FRONTEND: noninteractive
+     run: |
+       sudo -E apt-get -qq update
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
         bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
         git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
@@ -50,118 +64,124 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/local/lib/android /opt/ghc /usr/share/dotnet /usr/local/graalvm /usr/local/.ghcup \
         /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
 
-    - name: 克隆源代码
-      working-directory: ./
-      run: |
-        git clone --depth=1 --single-branch $REPO_URL -b $REPO_BRANCH openwrt
+   - name: 克隆源代码
+     working-directory: /srcdir
+     run: |
+       echo "Free space:"
+       df -hT $PWD
+       git clone $REPO_URL -b $REPO_BRANCH openwrt
+       ln -sf /srcdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 加载自定义 feeds
-      run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+   - name: 加载自定义 feeds
+     run: |
+       [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+       chmod +x $DIY_P1_SH
+       cd openwrt
+       $GITHUB_WORKSPACE/$DIY_P1_SH
 
-    - name: 更新和安装 feeds
-      working-directory: ./openwrt
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+   - name: 更新和安装 feeds
+     run: |
+       cd openwrt 
+       ./scripts/feeds update -a
+       ./scripts/feeds install -a
 
-    - name: 加载自定义配置
-      run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+   - name: 加载自定义配置
+     run: |
+       [ -e files ] && mv files openwrt/files
+       [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+       chmod +x $DIY_P2_SH
+       cd openwrt
+       $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 下载软件包
-      id: package
-      run: |
-        cd openwrt
-        make defconfig
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+   - name: 下载软件包
+     id: package
+     run: |
+       cd openwrt
+       make defconfig
+       make download -j8 V=s
+       find dl -size -1024c -exec ls -l {} \;
+       find dl -size -1024c -exec rm -f {} \;
 
-    - name: 编译固件
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) 线程编译"
-        make -j$(nproc) V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+   - name: 编译固件
+     id: compile
+     run: |
+       cd openwrt
+       echo -e "$(nproc) 线程编译"
+       make -j$(nproc) || make -j1 || make -j1 V=s
+       echo "status=success" >> $GITHUB_OUTPUT
+       grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+       [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+       echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: 检查空间使用情况
-      if: (!cancelled())
-      run: df -hT
+   - name: 检查空间使用情况
+     if: (!cancelled())
+     run: df -hT
 
-    - name: 整理文件
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "固件目录:"
-        ls -lh
-        echo "status=success" >> $GITHUB_OUTPUT
+   - name: 整理文件
+     id: organize
+     if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+     run: |
+       cd openwrt/bin/targets/*/*
+       rm -rf packages
+       echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+       echo "固件目录:"
+       ls -lh
+       echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 检查文件大小
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd ${{ env.FIRMWARE }}
-        ls -lh
+   - name: 上传固件目录
+     uses: actions/upload-artifact@main
+     if: steps.organize.outputs.status == 'success' && !cancelled()
+     with:
+       name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+       path: ${{ env.FIRMWARE }}
 
-    - name: 上传固件目录
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
+   - name: 生成发布标签
+     id: tag
+     if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+     run: |
+       echo "release_tag=OpenWrt_$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+       touch release.txt
+       echo "OpenWrt 🎈 Firmware" >> release.txt
+       echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 生成发布标签
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
+   - name: 上传固件到发布
+     id: release
+     uses: softprops/action-gh-release@v2
+     if: steps.tag.outputs.status == 'success' && !cancelled()
+     with:
+       tag_name: ${{ steps.tag.outputs.release_tag }}
+       body_path: release.txt
+       files: ${{ env.FIRMWARE }}/*
+     env:
+       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: 上传固件到发布
-      uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: |
-          ${{ env.FIRMWARE }}/*.gz
-          ${{ env.FIRMWARE }}/*.bin
-          ${{ env.FIRMWARE }}/*.buildinfo
-          ${{ env.FIRMWARE }}/*.manifest
-          ${{ env.FIRMWARE }}/sha256sums
-          ${{ env.FIRMWARE }}/profiles.json
-          ${{ env.FIRMWARE }}/version.buildinfo
-          ${{ env.FIRMWARE }}/feeds.buildinfo
-          ${{ env.FIRMWARE }}/config.buildinfo
+   - name: 清理编译
+     id: clean-compile
+     run: |
+       cd openwrt
+       make clean
 
-    - name: 删除旧的 workflow 运行记录
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 1
-        keep_minimum_runs: 3
+   - name: 缓存编译
+     id: cache-compile
+     uses: actions/cache/save@v4
+     if: steps.compile.outputs.status == 'success' && !cancelled()
+     with:
+       path: openwrt
+       key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/feeds.conf.default') }}
 
-    - name: 删除旧的发布
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+   - name: 删除旧的 workflow 运行记录
+     uses: Mattraks/delete-workflow-runs@v2
+     with:
+       token: ${{ github.token }}
+       repository: ${{ github.repository }}
+       retain_days: 7
+       keep_minimum_runs: 3
+
+   - name: 删除旧的发布
+     uses: dev-drprasad/delete-older-releases@v0.3.4
+     if: steps.release.outputs.status == 'success' && !cancelled()
+     with:
+       keep_latest: 3
+       delete_tags: true
+     env:
+       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
